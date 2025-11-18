@@ -11,8 +11,18 @@ import csv                           # for saving/loading CSV data
 import tkinter.font as tkfont        # to measure text line height for auto row sizing
 from typing import Optional          # type hints for readability
 
+import threading                     # for running Selenium in a background thread
+
 # --- Third-party library ---
 from tksheet import Sheet            # grid widget with rich features (per-cell style, selection, etc.)
+
+# Optional: tkcalendar for date picker (pip install tkcalendar)
+try:
+    from tkcalendar import DateEntry
+except ImportError:
+    DateEntry = None  # fallback to simple Entry widget
+
+
 
 # --- Local modules (your own files) ---
 from constants import (
@@ -55,6 +65,10 @@ class JournalApp(tk.Tk, AutosaveMixin):
 
         # Selected/active bar indicator (combobox shows this value)
         self.current_bar = tk.StringVar(value=str(BAR_ORDER[0]))
+
+        self.replay_date = tk.StringVar(
+            value=datetime.now().strftime("%Y-%m-%d")
+        )
 
         self._build_ui()
 
@@ -167,6 +181,35 @@ class JournalApp(tk.Tk, AutosaveMixin):
         ttk.Button(top, text="上一Bar",     command=self.prev_bar).pack(side="left", padx=4)
         ttk.Button(top, text="下一Bar (Enter)", command=self.next_bar).pack(side="left", padx=4)
         ttk.Button(top, text="Undo (Ctrl+Z)", command=self.undo_last).pack(side="left", padx=12)
+        
+        top1_5 = ttk.Frame(self); top1_5.pack(fill="x", padx=8, pady=(0,6))
+
+        ttk.Label(top1_5, text="Replay date").pack(side="left", padx=(4, 2))
+
+        if DateEntry is not None:
+            # Proper date picker from tkcalendar
+            self.replay_date_entry = DateEntry(
+                top1_5,
+                width=12,
+                date_pattern="yyyy-mm-dd",
+                textvariable=self.replay_date
+            )
+        else:
+            # Fallback: simple Entry if tkcalendar is not installed
+            self.replay_date_entry = ttk.Entry(
+                top1_5,
+                width=12,
+                textvariable=self.replay_date
+            )
+        self.replay_date_entry.pack(side="left", padx=(2, 8))
+
+        # Button to launch TradingView in Selenium (runs in background thread)
+        self.replay_btn = ttk.Button(
+            top1_5,
+            text="Replay TradingView",
+            command=self._open_tradingview_replay
+            )
+        self.replay_btn.pack(side="left", padx=4)
 
         # Second toolbar
         top2 = ttk.Frame(self); top2.pack(fill="x", padx=8, pady=(0,6))
@@ -1153,7 +1196,65 @@ class JournalApp(tk.Tk, AutosaveMixin):
             for k in ("bull", "bear", "tr", "bias"):
                 self._rebuild_point_panels(k)
             messagebox.showinfo("已重設", "詞庫已恢復為原始預設。")
+    def _open_tradingview_replay(self):
+        """Launch TradingView in a Selenium Chrome window on a background thread.
 
+        - Uses self.replay_date.get() as the chosen date (for future use).
+        - Does NOT block the Tkinter UI.
+        """
+
+        # Read the currently selected date (not yet used to click anything in TradingView)
+        date_str = self.replay_date.get().strip()
+
+        def worker():
+            try:
+                # Import selenium here so the app still starts even if selenium is missing
+                from selenium import webdriver
+                from selenium.webdriver.chrome.service import Service as ChromeService
+                from selenium.webdriver.chrome.options import Options
+                from webdriver_manager.chrome import ChromeDriverManager
+            except Exception as e:
+                # We are in a background thread; use after() to show a messagebox safely
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Selenium error",
+                        "Failed to import Selenium or webdriver-manager.\n\n"
+                        f"Error: {e}\n\n"
+                        "Please install:\n"
+                        "  pip install selenium webdriver-manager"
+                    )
+                )
+                return
+
+            try:
+                options = Options()
+                # Keep browser open after the script finishes
+                options.add_experimental_option("detach", True)
+
+                # Create Chrome driver (auto-manage chromedriver)
+                driver = webdriver.Chrome(
+                    service=ChromeService(ChromeDriverManager().install()),
+                    options=options,
+                )
+
+                # Navigate to TradingView homepage.
+                # (Later we can automate logging in and Replay UI using date_str)
+                driver.get("https://www.tradingview.com")
+
+                # Do NOT call driver.quit() so the user can continue using the browser.
+            except Exception as e:
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Selenium error",
+                        "Failed to launch Chrome / navigate to TradingView.\n\n"
+                        f"Error: {e}"
+                    )
+                )
+
+        # Run Selenium in a background thread so Tkinter UI stays responsive
+        threading.Thread(target=worker, daemon=True).start()
 
 
 
@@ -1238,3 +1339,5 @@ class PresetEditor(tk.Toplevel):
 
     def _cancel(self):
         self.result = None; self.destroy()
+
+    
