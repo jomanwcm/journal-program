@@ -17,10 +17,57 @@ import threading                     # for running Selenium in a background thre
 from tksheet import Sheet            # grid widget with rich features (per-cell style, selection, etc.)
 
 # Optional: tkcalendar for date picker (pip install tkcalendar)
+
+# Optional: tkcalendar for date picker (pip install tkcalendar)
 try:
-    from tkcalendar import DateEntry
+    from tkcalendar import DateEntry as _BaseDateEntry
+
+    class DateEntry(_BaseDateEntry):
+        """
+        Small wrapper around tkcalendar.DateEntry to avoid the bug where
+        the calendar popup closes when you click the month/year header
+        after reopening the dropdown.
+        """
+        def __init__(self, master=None, **kw):
+            super().__init__(master, **kw)
+            # Remove the original FocusOut handler
+            try:
+                self._calendar.unbind('<FocusOut>')
+            except Exception:
+                pass
+            # Bind our safer handler
+            self._calendar.bind('<FocusOut>', self._safe_focus_out)
+
+        def _safe_focus_out(self, event):
+            """
+            Only close the popup when the mouse is clearly outside the
+            calendar Toplevel. Clicking inside (e.g. month/year header)
+            should NOT close it.
+            """
+            try:
+                # Current pointer position (global screen coords)
+                x, y = self._top_cal.winfo_pointerxy()
+                xc = self._top_cal.winfo_rootx()
+                yc = self._top_cal.winfo_rooty()
+                w = self._top_cal.winfo_width()
+                h = self._top_cal.winfo_height()
+
+                inside = (xc <= x <= xc + w) and (yc <= y <= yc + h)
+
+                if not inside:
+                    # Pointer is outside the calendar popup -> close it
+                    self._top_cal.withdraw()
+                    self.state(['!pressed'])
+                # If inside, do nothing: keep the calendar open so the
+                # month/year selector can work normally.
+            except Exception:
+                # If something goes wrong, fall back to closing.
+                self._top_cal.withdraw()
+                self.state(['!pressed'])
+
 except ImportError:
     DateEntry = None  # fallback to simple Entry widget
+
 
 
 
@@ -1196,6 +1243,9 @@ class JournalApp(tk.Tk, AutosaveMixin):
             for k in ("bull", "bear", "tr", "bias"):
                 self._rebuild_point_panels(k)
             messagebox.showinfo("已重設", "詞庫已恢復為原始預設。")
+
+
+    # Definition of the Selenium TradingView Replay launcher
     def _open_tradingview_replay(self):
         """Launch TradingView in a Selenium Chrome window on a background thread.
 
