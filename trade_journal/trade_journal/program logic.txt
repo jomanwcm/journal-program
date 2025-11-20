@@ -1,7 +1,12 @@
 # Trade Journal Program
 
+
 This is a **Python-based trade journal application** built with Tkinter and `tksheet`.  
 It is designed to help traders quickly record price action arguments (bull, bear, trading range, bias) for each bar in a trading session.
+Also, it hsa the function of utilizing selenium to  automatically open chrome browser, navigate to  tradingview and press the bar reply of
+of a specific day to facilitate my bar replay exercise.
+
+Please study the attached zip file containing the program and stay intact. Then I will tell you what enhancement I want to have.
 
 ---
 

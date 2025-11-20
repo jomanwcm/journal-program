@@ -83,6 +83,7 @@ import json, os
 from pathlib import Path
 import constants as CONST  # runtime-editable presets
 
+from selenium_client import open_tradingview_and_click_login, goto_chart_and_dismiss_popup
 
 
 class JournalApp(tk.Tk, AutosaveMixin):
@@ -95,6 +96,9 @@ class JournalApp(tk.Tk, AutosaveMixin):
         # In-memory data
         self.data = {}
         self.history = []
+
+        # Selenium WebDriver (shared between buttons)
+        self._selenium_driver = None
 
         self.shift_held = False
         self._resizing_columns = False
@@ -257,6 +261,14 @@ class JournalApp(tk.Tk, AutosaveMixin):
             command=self._open_tradingview_replay
             )
         self.replay_btn.pack(side="left", padx=4)
+
+        # NEW: Button to reuse existing Selenium browser and go to chart
+        self.reuse_selenium_btn = ttk.Button(
+            top1_5,
+            text="Go to Chart (reuse)",
+            command=self._selenium_goto_chart
+        )
+        self.reuse_selenium_btn.pack(side="left", padx=4)
 
         # Second toolbar
         top2 = ttk.Frame(self); top2.pack(fill="x", padx=8, pady=(0,6))
@@ -1247,65 +1259,41 @@ class JournalApp(tk.Tk, AutosaveMixin):
 
     # Definition of the Selenium TradingView Replay launcher
     def _open_tradingview_replay(self):
-        """Launch TradingView in a Selenium Chrome window on a background thread.
+        def run():
+            driver = open_tradingview_and_click_login()
+            # (Next steps: log in, navigate chart, bar replay)
 
-        - Uses self.replay_date.get() as the chosen date (for future use).
-        - Does NOT block the Tkinter UI.
+            # Save the driver so other buttons can reuse this browser
+            self._selenium_driver = driver
+        threading.Thread(target=run, daemon=True).start()
+
+    def _selenium_goto_chart(self):
         """
+        Use the existing Selenium Chrome window (if any) to:
+        - navigate to the TradingView chart URL
+        - click the "Don't need" button if it appears.
 
-        # Read the currently selected date (not yet used to click anything in TradingView)
-        date_str = self.replay_date.get().strip()
-
+        Runs in a background thread so the Tkinter UI stays responsive.
+        """
         def worker():
-            try:
-                # Import selenium here so the app still starts even if selenium is missing
-                from selenium import webdriver
-                from selenium.webdriver.chrome.service import Service as ChromeService
-                from selenium.webdriver.chrome.options import Options
-                from webdriver_manager.chrome import ChromeDriverManager
-            except Exception as e:
-                # We are in a background thread; use after() to show a messagebox safely
-                self.after(
-                    0,
-                    lambda: messagebox.showerror(
-                        "Selenium error",
-                        "Failed to import Selenium or webdriver-manager.\n\n"
-                        f"Error: {e}\n\n"
-                        "Please install:\n"
-                        "  pip install selenium webdriver-manager"
-                    )
+            driver = self._selenium_driver
+            if driver is None:
+                messagebox.showerror(
+                    "Selenium not started",
+                    "No Selenium browser is currently running.\n\n"
+                    "Please click 'Replay TradingView' first."
                 )
                 return
 
             try:
-                options = Options()
-                # Keep browser open after the script finishes
-                options.add_experimental_option("detach", True)
-
-                # Create Chrome driver (auto-manage chromedriver)
-                driver = webdriver.Chrome(
-                    service=ChromeService(ChromeDriverManager().install()),
-                    options=options,
-                )
-
-                # Navigate to TradingView homepage.
-                # (Later we can automate logging in and Replay UI using date_str)
-                driver.get("https://www.tradingview.com")
-
-                # Do NOT call driver.quit() so the user can continue using the browser.
+                goto_chart_and_dismiss_popup(driver)
             except Exception as e:
-                self.after(
-                    0,
-                    lambda: messagebox.showerror(
-                        "Selenium error",
-                        "Failed to launch Chrome / navigate to TradingView.\n\n"
-                        f"Error: {e}"
-                    )
+                messagebox.showerror(
+                    "Selenium error",
+                    f"Error while redirecting the existing browser:\n\n{e}"
                 )
 
-        # Run Selenium in a background thread so Tkinter UI stays responsive
         threading.Thread(target=worker, daemon=True).start()
-
 
 
 
